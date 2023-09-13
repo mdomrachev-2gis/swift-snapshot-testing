@@ -178,7 +178,7 @@
     let scale = max(old.scale, new.scale)
     UIGraphicsBeginImageContextWithOptions(CGSize(width: width, height: height), true, scale)
     new.draw(at: .zero)
-    old.draw(at: .zero, blendMode: .difference, alpha: 1)
+    old.draw(at: .zero, blendMode: .clear, alpha: 1)
     let differenceImage = UIGraphicsGetImageFromCurrentImageContext()!
     UIGraphicsEndImageContext()
     return differenceImage
