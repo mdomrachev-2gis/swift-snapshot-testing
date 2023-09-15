@@ -35,7 +35,7 @@
           let message = compare(
             old, new, precision: precision, perceptualPrecision: perceptualPrecision)
         else { return nil }
-		guard let difference = SnapshotTesting.diff(old, new) else { return nil }
+        let difference = SnapshotTesting.diff(old, new)
         let oldAttachment = XCTAttachment(image: old)
         oldAttachment.name = "reference"
         let isEmptyImage = new.size == .zero
@@ -172,46 +172,17 @@
     return context
   }
 
-private func diff(_ old: UIImage, _ new: UIImage) -> UIImage? {
-	guard let ciImage = CIImage(image: new),
-		  let backgroundCIImage = CIImage(image: old) else {
-		return nil
-	}
-	
-	guard let diffFilter = CIFilter(name: "CIDifferenceBlendMode") else {
-		return nil
-	}
-	
-	diffFilter.setValue(ciImage, forKey: kCIInputImageKey)
-	diffFilter.setValue(backgroundCIImage, forKey: kCIInputBackgroundImageKey)
-	
-	guard let outputCIImage = diffFilter.outputImage else {
-		return nil
-	}
-	
-	guard let transparencyFilter = CIFilter(name: "CIMaskToAlpha") else {
-		return nil
-	}
-	
-	transparencyFilter.setValue(outputCIImage, forKey: kCIInputImageKey)
-	
-	guard let diffImage = transparencyFilter.outputImage else {
-		return nil
-	}
-	
-	guard let filter = CIFilter(name: "CIColorControls") else { return nil }
-	filter.setValue(diffImage, forKey: kCIInputImageKey)
-	filter.setValue(1.5, forKey: kCIInputContrastKey)
-	
-	guard let outputImage = filter.outputImage else { return nil }
-	let context = CIContext(options: nil)
-	guard let cgImage = context.createCGImage(outputImage, from: diffImage.extent) else {
-		return nil
-	}
-	
-	return UIImage(cgImage: cgImage)
-}
-
+  private func diff(_ old: UIImage, _ new: UIImage) -> UIImage {
+    let width = max(old.size.width, new.size.width)
+    let height = max(old.size.height, new.size.height)
+    let scale = max(old.scale, new.scale)
+    UIGraphicsBeginImageContextWithOptions(CGSize(width: width, height: height), true, scale)
+    new.draw(at: .zero)
+    old.draw(at: .zero, blendMode: .difference, alpha: 1)
+    let differenceImage = UIGraphicsGetImageFromCurrentImageContext()!
+    UIGraphicsEndImageContext()
+    return differenceImage
+  }
 #endif
 
 #if os(iOS) || os(tvOS) || os(macOS)
