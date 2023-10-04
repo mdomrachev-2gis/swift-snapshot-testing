@@ -2,6 +2,13 @@
   import UIKit
   import XCTest
 
+  public extension Diffing where Value == UIImage {
+    /// A function to calculate diff image
+    static var findDiff: (_ oldImage: UIImage, _ newImage: UIImage) -> UIImage = { oldImage, newImage in
+      SnapshotTesting.dgisPixelDiff(oldImage, newImage) ?? newImage
+    }
+  }
+
   extension Diffing where Value == UIImage {
     /// A pixel-diffing strategy for UIImage's which requires a 100% match.
     public static let image = Diffing.image()
@@ -35,7 +42,7 @@
           let message = compare(
             old, new, precision: precision, perceptualPrecision: perceptualPrecision)
         else { return nil }
-		guard let difference = SnapshotTesting.diff(old, new) else { return nil }
+        let difference = findDiff(old, new)
         let oldAttachment = XCTAttachment(image: old)
         oldAttachment.name = "reference"
         let isEmptyImage = new.size == .zero
@@ -173,39 +180,68 @@
   }
 
   private func diff(_ old: UIImage, _ new: UIImage) -> UIImage? {
-	  guard let ciImage = CIImage(image: new),
-			let backgroundCIImage = CIImage(image: old) else {
-		  return nil
-	  }
-	  
-	  guard let diffFilter = CIFilter(name: "CIDifferenceBlendMode") else {
-		  return nil
-	  }
-	  
-	  diffFilter.setValue(ciImage, forKey: kCIInputImageKey)
-	  diffFilter.setValue(backgroundCIImage, forKey: kCIInputBackgroundImageKey)
-	  
-	  guard let outputCIImage = diffFilter.outputImage else {
-		  return nil
-	  }
-	  
-	  guard let transparencyFilter = CIFilter(name: "CIMaskToAlpha") else {
-		  return nil
-	  }
-	  
-	  transparencyFilter.setValue(outputCIImage, forKey: kCIInputImageKey)
-	  
-	  guard let outputImage = transparencyFilter.outputImage else {
-		  return nil
-	  }
-	  
-	  let context = CIContext(options: nil)
-	  guard let cgImage = context.createCGImage(outputImage, from: outputImage.extent) else {
-		  return nil
-	  }
-	  
-	  return UIImage(cgImage: cgImage)
+    let width = max(old.size.width, new.size.width)
+    let height = max(old.size.height, new.size.height)
+    let scale = max(old.scale, new.scale)
+    UIGraphicsBeginImageContextWithOptions(CGSize(width: width, height: height), true, scale)
+    new.draw(at: .zero)
+    old.draw(at: .zero, blendMode: .difference, alpha: 1)
+    let differenceImage = UIGraphicsGetImageFromCurrentImageContext()!
+    UIGraphicsEndImageContext()
+    return differenceImage
   }
+
+  func dgisPixelDiff(_ oldImage: UIImage, _ newImage: UIImage) -> UIImage? {
+    guard let oldCGImage = oldImage.cgImage, let newCGImage = newImage.cgImage else {
+      return nil
+    }
+
+    let width = max(oldCGImage.width, newCGImage.width)
+    let height = max(oldCGImage.height, newCGImage.height)
+
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    let bytesPerPixel = 4
+    let bytesPerRow = bytesPerPixel * width
+    let bitsPerComponent = 8
+
+    let oldContext = CGContext(data: nil, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    let newContext = CGContext(data: nil, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    let diffContext = CGContext(data: nil, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+
+    oldContext?.draw(oldCGImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+    newContext?.draw(newCGImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+    let oldData = oldContext?.data?.assumingMemoryBound(to: UInt8.self)
+    let newData = newContext?.data?.assumingMemoryBound(to: UInt8.self)
+    let diffData = diffContext?.data?.assumingMemoryBound(to: UInt8.self)
+
+    if let oldData = oldData, let newData = newData, let diffData = diffData {
+      for i in 0..<(width * height) {
+        let pixelIndex = i
+        let dataIndex = i * 4
+        if oldData[dataIndex] != newData[dataIndex] || oldData[dataIndex + 1] != newData[dataIndex + 1] || oldData[dataIndex + 2] != newData[dataIndex + 2] || oldData[dataIndex + 3] != newData[dataIndex + 3] {
+          /// This is a color for pixels which are not equal in RGBA format
+          diffData[dataIndex] = 143
+          diffData[dataIndex + 1] = 224
+          diffData[dataIndex + 2] = 9
+          diffData[dataIndex + 3] = 255
+        } else {
+          /// If the pixels are equal the result is their color with reduced alpha component
+          diffData[dataIndex] = oldData[dataIndex]
+          diffData[dataIndex + 1] = oldData[dataIndex + 1]
+          diffData[dataIndex + 2] = oldData[dataIndex + 2]
+          diffData[dataIndex + 3] = oldData[dataIndex + 3] / 5
+        }
+      }
+
+      if let diffImage = diffContext?.makeImage() {
+        return UIImage(cgImage: diffImage)
+      }
+    }
+
+    return nil
+  }
+
 #endif
 
 #if os(iOS) || os(tvOS) || os(macOS)
